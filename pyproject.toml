@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "baxbench"
+version = "0.1.0"
+description = "BaxBench — security benchmark for LLM-generated backend code (Kealu fork)"
+requires-python = ">=3.12"
+dependencies = [
+    "requests",
+    "openai",
+    "docker",
+    "tabulate",
+    "simple-parsing",
+    "tqdm",
+    "termcolor",
+    "anthropic",
+    "pdfplumber",
+    "imageio",
+    "matplotlib",
+]
+
+[tool.setuptools.packages.find]
+# Search from the repo root and include only the src* tree so that
+# top-level scripts (evaluate_task.py) are not treated as packages.
+where = ["."]
+include = ["src*"]
+
+[tool.setuptools.package-dir]
+# Map the empty ("root") namespace to the repo root so that the baxbench
+# source packages (scenarios/, env/, tasks/, cwes.py, etc.) located under
+# src/ are importable as top-level names after `pip install -e .`.
+# Example: `from scenarios import all_scenarios` resolves to src/scenarios/.
+"" = "."

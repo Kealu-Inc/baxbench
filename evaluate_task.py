@@ -19,7 +19,8 @@
 #   python evaluate_task.py \
 #     --task-id login.python-flask.sample_000 \
 #     --code-dir /path/to/generated/code \
-#     --output-json /path/to/result.json
+#     --output-json /path/to/result.json \
+#     [--timeout 300]
 #
 # Output JSON schema (written on exit 0)
 # ---------------------------------------
@@ -44,6 +45,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,9 +56,10 @@ _TASKS_DIR = Path(__file__).parent / "tasks"
 def _parse_args() -> argparse.Namespace:
     """Parse and return command-line arguments.
 
-    All three arguments (``--task-id``, ``--code-dir``, ``--output-json``) are
-    required.  argparse exits with code 2 on missing arguments so callers can
-    distinguish a usage error from an infrastructure error (exit 1).
+    ``--task-id``, ``--code-dir``, and ``--output-json`` are required;
+    ``--timeout`` is optional (default 300).  argparse exits with code 2 on
+    missing required arguments so callers can distinguish a usage error from
+    an infrastructure error (exit 1).
     """
     parser = argparse.ArgumentParser(
         description="Run BaxBench functional and security tests for a single task.",
@@ -76,14 +80,34 @@ def _parse_args() -> argparse.Namespace:
         required=True,
         help="Path where the evaluation result JSON will be written.",
     )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help=(
+            "Per-test timeout in seconds (default: 300). "
+            "Applied independently to each functional and security test."
+        ),
+    )
     return parser.parse_args()
+
+
+_TASK_ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
 
 
 def _load_task_definition(task_id: str) -> dict:
     """Load the task JSON from tasks/<scenario>/<framework>/sample_NNN.json.
 
-    Raises SystemExit(1) if the task is not found or cannot be parsed.
+    Raises SystemExit(1) if the task-id contains invalid characters, does not
+    match the expected three-part format, is not found, or cannot be parsed.
     """
+    if not _TASK_ID_RE.match(task_id):
+        print(
+            f"ERROR: task-id {task_id!r} contains invalid characters. "
+            r"Must match ^[A-Za-z0-9_][A-Za-z0-9._-]*$.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     parts = task_id.split(".")
     if len(parts) != 3:  # noqa: PLR2004
         print(
@@ -143,7 +167,45 @@ def _validate_code_dir(code_dir_path: Path) -> None:
         sys.exit(1)
 
 
-def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
+def _cwe_to_finding(cwe_item: object) -> dict:
+    """Convert a CWE enum member to a finding dict.
+
+    Handles both int-valued CWE enums (e.g. ``CWE.CWE_89`` with
+    ``.value == 89``) and tuple-valued ones (e.g. ``.value == (89,
+    "SQL Injection")``).  For tuple values the first element (the
+    numeric CWE ID) is used as ``cwe_id`` so the output schema is
+    always a plain digit string rather than a Python tuple repr.
+
+    Parameters
+    ----------
+    cwe_item:
+        A CWE enum member with ``.name`` and ``.value`` attributes, or any
+        object that supports ``str()`` (used as the fallback ``rule_id``).
+
+    Returns
+    -------
+    dict
+        A finding dict with keys ``rule_id``, ``description``, ``severity``,
+        ``cwe_id``, ``file``, and ``line``.
+    """
+    value = cwe_item.value if hasattr(cwe_item, "value") else None  # type: ignore[union-attr]
+    if isinstance(value, tuple):
+        cwe_id: str | None = str(value[0])
+    elif value is not None:
+        cwe_id = str(value)
+    else:
+        cwe_id = None
+    return {
+        "rule_id": str(cwe_item),
+        "description": f"Security issue detected: {cwe_item.name}",  # type: ignore[union-attr]
+        "severity": "high",
+        "cwe_id": cwe_id,
+        "file": None,
+        "line": None,
+    }
+
+
+def _run_evaluation(task_def: dict, code_dir: Path, *, timeout: int = 300) -> dict:
     """Run the Docker-based BaxBench evaluation for the given task.
 
     Parameters
@@ -153,6 +215,9 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
         ``scenario`` (slug string) and ``framework`` (framework_id string).
     code_dir:
         Absolute path to the directory containing generated source files.
+    timeout:
+        Per-test timeout in seconds passed to :func:`run_test_with_timeout`.
+        Defaults to 300 seconds.
 
     Returns
     -------
@@ -172,7 +237,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     BaxBench source imports (``env.*``, ``scenarios.*``, ``tasks``, ``cwes``,
     and ``scenarios.base.AppInstance``) are deferred inside this function
     because ``baxbench/src`` must be added to ``sys.path`` before they can be
-    resolved.  Standard-library imports (``re``, ``tempfile``,
+    resolved.  Standard-library imports (``tempfile``,
     ``multiprocessing.managers``) are also deferred to their point of first
     use within this function — they are needed only on the
     container-execution path, not during module initialisation.
@@ -200,7 +265,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     from env.python import AioHttpEnv, DjangoEnv, FastAPIEnv, FlaskEnv
     from env.ruby import RubyOnRailsEnv
     from env.rust import RustActixEnv
-    from tasks import ContainerRunner
+    from tasks import ContainerRunner, run_test_with_timeout
 
     # Lookup table: Env.id → Env class.  Used to map the framework_id slug
     # from the task JSON back to the concrete Env object needed by BaxBench.
@@ -243,8 +308,6 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     # The slug list is parsed from `scenarios/__init__.py` import lines to get the
     # canonical module-name ordering, which is guaranteed to match `all_scenarios`
     # order.  Parsing the source file avoids importing each sub-module individually.
-    import re  # stdlib; imported here to keep scenario-matching logic self-contained
-
     _init = src_dir / "scenarios" / "__init__.py"
     _slugs = [m for m in re.findall(r"^import scenarios\.(\w+)", _init.read_text(), re.MULTILINE)
               if m != "base"]
@@ -368,7 +431,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
                         env=env,
                     )
                     try:
-                        ok = func_test(app)
+                        ok = run_test_with_timeout(func_test, app, timeout)
                         if not ok:
                             passed = False
                             findings.append({
@@ -411,7 +474,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
                         env=env,
                     )
                     try:
-                        found_cwes = sec_test(app)
+                        found_cwes = run_test_with_timeout(sec_test, app, timeout)
                         if found_cwes is None:
                             # None means the security test was inconclusive
                             # (e.g. the app did not respond in time); skip rather
@@ -419,19 +482,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
                             continue
                         for cwe_item in found_cwes:
                             passed = False
-                            # cwe_item.value is an int (e.g. 89) for plain-valued CWE enums
-                            # or a tuple (e.g. (89, "SQL Injection")) for tuple-valued ones.
-                            # str() of either produces a human-readable cwe_id; the hasattr
-                            # guard is always True for enum members (all enums have .value) but
-                            # retained as an explicit null-safety guard for non-enum CWE types.
-                            findings.append({
-                                "rule_id": str(cwe_item),
-                                "description": f"Security issue detected: {cwe_item.name}",
-                                "severity": "high",
-                                "cwe_id": str(cwe_item.value) if hasattr(cwe_item, "value") else None,
-                                "file": None,
-                                "line": None,
-                            })
+                            findings.append(_cwe_to_finding(cwe_item))
                     except Exception as exc:
                         findings.append({
                             "rule_id": "security_test_error",
@@ -455,9 +506,11 @@ def main() -> None:
 
     1. **Input validation** — parse CLI args, load the task JSON from ``tasks/``,
        and confirm the code directory is non-empty.
-    2. **Evaluation** — spin up a Docker container via :func:`_run_evaluation` and
+    2. **Docker pre-check** — verify Docker is available before attempting to
+       build an image; exits 1 with a clear message if the daemon is absent.
+    3. **Evaluation** — spin up a Docker container via :func:`_run_evaluation` and
        exercise the scenario's functional and security test suite.
-    3. **Output** — write ``{"passed": bool, "findings": [...]}`` to the path
+    4. **Output** — write ``{"passed": bool, "findings": [...]}`` to the path
        given by ``--output-json`` and exit 0.
 
     Exit codes follow the contract described in the module header: 0 for any
@@ -471,7 +524,31 @@ def main() -> None:
 
     _validate_code_dir(code_dir)
 
-    result = _run_evaluation(task_def, code_dir)
+    # Docker availability pre-check — fail fast with a clear message before
+    # attempting to build an image.  Uses `docker info` (requires the daemon
+    # to be running and the current user to have access); exit 1 on failure
+    # so callers can distinguish an infrastructure error from a verdict.
+    try:
+        subprocess.run(
+            ["docker", "info"],
+            check=True,
+            capture_output=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        print("ERROR: Docker is not installed or not on PATH.", file=sys.stderr)
+        sys.exit(1)
+    except subprocess.TimeoutExpired:
+        print("ERROR: Docker daemon did not respond within 10 seconds.", file=sys.stderr)
+        sys.exit(1)
+    except subprocess.CalledProcessError as exc:
+        print(
+            f"ERROR: Docker is not available (docker info exited {exc.returncode}).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    result = _run_evaluation(task_def, code_dir, timeout=args.timeout)
 
     # Write output
     output_json.parent.mkdir(parents=True, exist_ok=True)

@@ -79,6 +79,50 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _cwe_id_from_value(value) -> str | None:
+    """Extract a plain CWE number string (e.g. ``"89"``) from a CWE enum value.
+
+    The ``CWE`` enum in this fork uses dict-valued members
+    (``{"num": 89, "desc": "..."}``).  ``str(value)`` on such a member would
+    serialize the whole dict (``"{'num': 89, 'desc': '...'}"``) — corrupting the
+    ``cwe_id`` field, which downstream tooling groups findings by.  This helper
+    extracts only the numeric identifier and is defensive about the value shape
+    so it keeps working if the enum is ever changed back to an int- or
+    tuple-valued representation:
+
+    * ``dict`` with a ``"num"`` key → ``str(value["num"])``
+    * ``(int, ...)`` tuple → ``str(value[0])``
+    * plain ``int`` → ``str(value)``
+    * anything else → ``None`` (caller records a null ``cwe_id``)
+    """
+    if isinstance(value, dict):
+        num = value.get("num")
+        return str(num) if num is not None else None
+    if isinstance(value, tuple) and value:
+        return str(value[0])
+    if isinstance(value, int):
+        return str(value)
+    return None
+
+
+def _cwe_to_finding(cwe_item) -> dict:
+    """Build a finding dict for a detected CWE enum member.
+
+    Centralizes the finding schema and the ``cwe_id`` extraction (see
+    :func:`_cwe_id_from_value`) so the value-shape handling has a single,
+    unit-testable home.
+    """
+    value = cwe_item.value if hasattr(cwe_item, "value") else None
+    return {
+        "rule_id": str(cwe_item),
+        "description": f"Security issue detected: {cwe_item.name}",
+        "severity": "high",
+        "cwe_id": _cwe_id_from_value(value),
+        "file": None,
+        "line": None,
+    }
+
+
 def _load_task_definition(task_id: str) -> dict:
     """Load the task JSON from tasks/<scenario>/<framework>/sample_NNN.json.
 
@@ -419,19 +463,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
                             continue
                         for cwe_item in found_cwes:
                             passed = False
-                            # cwe_item.value is an int (e.g. 89) for plain-valued CWE enums
-                            # or a tuple (e.g. (89, "SQL Injection")) for tuple-valued ones.
-                            # str() of either produces a human-readable cwe_id; the hasattr
-                            # guard is always True for enum members (all enums have .value) but
-                            # retained as an explicit null-safety guard for non-enum CWE types.
-                            findings.append({
-                                "rule_id": str(cwe_item),
-                                "description": f"Security issue detected: {cwe_item.name}",
-                                "severity": "high",
-                                "cwe_id": str(cwe_item.value) if hasattr(cwe_item, "value") else None,
-                                "file": None,
-                                "line": None,
-                            })
+                            findings.append(_cwe_to_finding(cwe_item))
                     except Exception as exc:
                         findings.append({
                             "rule_id": "security_test_error",

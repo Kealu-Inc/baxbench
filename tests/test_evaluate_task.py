@@ -1,19 +1,48 @@
 import pytest
 
 from cwes import CWE
-from evaluate_task import _cwe_id_from_value, _cwe_to_finding
+from evaluate_task import _cwe_id_from_value, _cwe_to_finding, _make_finding
 
 
 def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id():
-    # CWE.SQL_INJECTION.value == {"num": 89, "desc": "..."}; cwe_id must be "89",
-    # NOT the serialized dict string.
+    """Regression test for the dict-valued cwe_id serialization defect.
+
+    Before the fix, _cwe_to_finding stringified the whole dict-valued CWE enum
+    member ({"num": 89, ...}) into cwe_id. This pins the entire finding contract:
+    cwe_id is the bare number "89" and every other field matches the schema.
+    """
     finding = _cwe_to_finding(CWE.SQL_INJECTION)
-    cwe_id = finding["cwe_id"]
-    assert cwe_id == "89"
+    assert finding == {
+        "rule_id": "CWE.SQL_INJECTION",
+        "description": "Security issue detected: SQL_INJECTION",
+        "severity": "high",
+        "cwe_id": "89",
+        "file": None,
+        "line": None,
+    }
     # Negative contract: none of the dict's structural markers may leak into cwe_id.
+    cwe_id = finding["cwe_id"]
     assert "{" not in cwe_id
     assert "num" not in cwe_id
     assert "desc" not in cwe_id
+
+
+def test_make_finding_omitting_cwe_id_defaults_to_none_with_null_file_and_line():
+    assert _make_finding("rule_x", "desc", "low") == {
+        "rule_id": "rule_x",
+        "description": "desc",
+        "severity": "low",
+        "cwe_id": None,
+        "file": None,
+        "line": None,
+    }
+
+
+def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied():
+    finding = _make_finding("rule_y", "d", "high", cwe_id="89")
+    assert finding["cwe_id"] == "89"
+    assert finding["file"] is None
+    assert finding["line"] is None
 
 
 @pytest.mark.parametrize(
@@ -26,5 +55,5 @@ def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id():
         ("unrecognized", None),  # other shape -> None
     ],
 )
-def test_cwe_id_from_value_branches(value, expected):
+def test_cwe_id_from_value_extracts_numeric_string_or_none(value, expected):
     assert _cwe_id_from_value(value) == expected

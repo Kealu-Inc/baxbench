@@ -27,6 +27,10 @@ dependencies = [
 where = ["."]
 include = ["src*"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+
 [tool.setuptools.package-dir]
 # Map the empty ("root") namespace to the repo root so that the baxbench
 # source packages (scenarios/, env/, tasks/, cwes.py, etc.) located under

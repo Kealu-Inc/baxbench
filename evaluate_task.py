@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from cwes import CWE
 
 _TASKS_DIR = Path(__file__).parent / "tasks"
+_logger = logging.getLogger("evaluate_task")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -105,25 +106,41 @@ def _cwe_id_from_value(value: object) -> str | None:
         return str(value[0])
     if isinstance(value, int):
         return str(value)
+    _logger.debug("Unrecognized CWE value shape %r; recording null cwe_id", value)
     return None
+
+
+def _make_finding(
+    rule_id: str,
+    description: str,
+    severity: str,
+    cwe_id: str | None = None,
+) -> dict[str, str | int | None]:
+    """Build a finding dict with the canonical schema (file/line currently always null)."""
+    return {
+        "rule_id": rule_id,
+        "description": description,
+        "severity": severity,
+        "cwe_id": cwe_id,
+        "file": None,
+        "line": None,
+    }
 
 
 def _cwe_to_finding(cwe_item: CWE) -> dict[str, str | int | None]:
     """Build a finding dict for a detected CWE enum member.
 
-    Centralizes the finding schema and the ``cwe_id`` extraction (see
-    :func:`_cwe_id_from_value`) so the value-shape handling has a single,
-    unit-testable home.
+    Delegates schema construction to :func:`_make_finding` and ``cwe_id``
+    extraction to :func:`_cwe_id_from_value`; keeps CWE-specific argument
+    mapping in a single, unit-testable place.
     """
     value = cwe_item.value
-    return {
-        "rule_id": str(cwe_item),
-        "description": f"Security issue detected: {cwe_item.name}",
-        "severity": "high",
-        "cwe_id": _cwe_id_from_value(value),
-        "file": None,
-        "line": None,
-    }
+    return _make_finding(
+        str(cwe_item),
+        f"Security issue detected: {cwe_item.name}",
+        "high",
+        cwe_id=_cwe_id_from_value(value),
+    )
 
 
 def _load_task_definition(task_id: str) -> dict[str, Any]:
@@ -336,13 +353,9 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                 )
             except (OSError, UnicodeDecodeError) as exc:
                 # Skip unreadable / binary files; missing files will manifest as build errors.
-                logging.getLogger("evaluate_task").debug(
-                    "Skipping unreadable file %s: %s", path, exc
-                )
+                _logger.debug("Skipping unreadable file %s: %s", path, exc)
 
     import tempfile  # stdlib; imported here so all container-lifecycle logic is grouped
-
-    logger = logging.getLogger("evaluate_task")
 
     # Build Docker image.  additional_docker_commands must include both
     # COMMON_DOCKER_RUN_COMMANDS (sqlite3 is required by BaxBench exploits) and
@@ -356,7 +369,7 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
         image_id = env.build_docker_image(
             files={p: content for p, content in code_files.items()},
             additional_docker_commands=docker_cmds,
-            logger=logger,
+            logger=_logger,
             no_cache=False,
         )
     except Exception as exc:
@@ -422,7 +435,7 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                     env=env,
                     port_manager=port_manager,
                     image_id=image_id,
-                    logger=logger,
+                    logger=_logger,
                 ) as container:
                     app = AppInstance(
                         port=container.port,
@@ -435,26 +448,20 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                         if not ok:
                             passed = False
                             findings.append(
-                                {
-                                    "rule_id": "functional_test_failure",
-                                    "description": f"Functional test {func_test.__name__} failed",
-                                    "severity": "high",
-                                    "cwe_id": None,
-                                    "file": None,
-                                    "line": None,
-                                }
+                                _make_finding(
+                                    "functional_test_failure",
+                                    f"Functional test {func_test.__name__} failed",
+                                    "high",
+                                )
                             )
                     except Exception as exc:
                         passed = False
                         findings.append(
-                            {
-                                "rule_id": "functional_test_error",
-                                "description": f"Functional test {func_test.__name__} raised: {exc}",
-                                "severity": "high",
-                                "cwe_id": None,
-                                "file": None,
-                                "line": None,
-                            }
+                            _make_finding(
+                                "functional_test_error",
+                                f"Functional test {func_test.__name__} raised: {exc}",
+                                "high",
+                            )
                         )
             except Exception as exc:
                 print(
@@ -472,7 +479,7 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                     env=env,
                     port_manager=port_manager,
                     image_id=image_id,
-                    logger=logger,
+                    logger=_logger,
                 ) as container:
                     app = AppInstance(
                         port=container.port,
@@ -492,14 +499,11 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                             findings.append(_cwe_to_finding(cwe_item))
                     except Exception as exc:
                         findings.append(
-                            {
-                                "rule_id": "security_test_error",
-                                "description": f"Security test {sec_test.__name__} raised: {exc}",
-                                "severity": "medium",
-                                "cwe_id": None,
-                                "file": None,
-                                "line": None,
-                            }
+                            _make_finding(
+                                "security_test_error",
+                                f"Security test {sec_test.__name__} raised: {exc}",
+                                "medium",
+                            )
                         )
             except Exception as exc:
                 print(

@@ -37,3 +37,9 @@ pythonpath = [".", "src"]
 # src/ are importable as top-level names after `pip install -e .`.
 # Example: `from scenarios import all_scenarios` resolves to src/scenarios/.
 "" = "."
+
+[tool.ruff]
+# Lint only the Kealu-fork's own code. The src/ tree is vendored upstream
+# BaxBench benchmark code with pre-existing style violations and is not part
+# of this fork's lint scope (CI runs only pytest; src/ was never linted).
+extend-exclude = ["src"]

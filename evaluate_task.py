@@ -43,7 +43,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -213,7 +212,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
 
     Notes
     -----
-    BaxBench source imports (``env.*``, ``scenarios.*``, ``tasks``, ``cwes``,
+    BaxBench source imports (``env.*``, ``scenarios.*``, ``tasks``,
     and ``scenarios.base.AppInstance``) are deferred inside this function
     because ``baxbench/src`` must be added to ``sys.path`` before they can be
     resolved.  Standard-library imports (``re``, ``tempfile``,
@@ -236,7 +235,6 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     # All BaxBench module imports are deferred inside this function because
     # sys.path is mutated just above to include baxbench/src; placing these
     # imports at module level would fail before sys.path is extended.
-    import cwes
     from env.base import COMMON_DOCKER_RUN_COMMANDS
     from env.go import FiberEnv, GinEnv, NetHttpEnv
     from env.javascript import ExpressEnv, FastifyEnv, KoaEnv, NestJsEnv
@@ -251,10 +249,20 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     _ALL_ENVS = {
         env.id: env
         for env in [
-            FlaskEnv, FastAPIEnv, DjangoEnv, AioHttpEnv,
-            NetHttpEnv, GinEnv, FiberEnv,
-            ExpressEnv, KoaEnv, FastifyEnv, NestJsEnv,
-            PhpLaravelLumenEnv, RubyOnRailsEnv, RustActixEnv,
+            FlaskEnv,
+            FastAPIEnv,
+            DjangoEnv,
+            AioHttpEnv,
+            NetHttpEnv,
+            GinEnv,
+            FiberEnv,
+            ExpressEnv,
+            KoaEnv,
+            FastifyEnv,
+            NestJsEnv,
+            PhpLaravelLumenEnv,
+            RubyOnRailsEnv,
+            RustActixEnv,
         ]
     }
 
@@ -290,8 +298,13 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     import re  # stdlib; imported here to keep scenario-matching logic self-contained
 
     _init = src_dir / "scenarios" / "__init__.py"
-    _slugs = [m for m in re.findall(r"^import scenarios\.(\w+)", _init.read_text(), re.MULTILINE)
-              if m != "base"]
+    _slugs = [
+        m
+        for m in re.findall(
+            r"^import scenarios\.(\w+)", _init.read_text(), re.MULTILINE
+        )
+        if m != "base"
+    ]
 
     for slug, sc in zip(_slugs, all_scenarios):
         if slug == scenario_slug:
@@ -313,7 +326,9 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     for path in sorted(code_dir.rglob("*")):
         if path.is_file():
             try:
-                code_files[path.relative_to(code_dir)] = path.read_text(encoding="utf-8")
+                code_files[path.relative_to(code_dir)] = path.read_text(
+                    encoding="utf-8"
+                )
             except (OSError, UnicodeDecodeError) as exc:
                 # Skip unreadable / binary files; missing files will manifest as build errors.
                 logging.getLogger("evaluate_task").debug(
@@ -327,10 +342,9 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
     # Build Docker image.  additional_docker_commands must include both
     # COMMON_DOCKER_RUN_COMMANDS (sqlite3 is required by BaxBench exploits) and
     # any scenario-specific packages declared in scenario.needed_packages.
-    scenario_packages: list[str] = (
-        scenario.needed_packages.get("_all_", [])
-        + scenario.needed_packages.get(env.language, [])
-    )
+    scenario_packages: list[str] = scenario.needed_packages.get(
+        "_all_", []
+    ) + scenario.needed_packages.get(env.language, [])
     docker_cmds = COMMON_DOCKER_RUN_COMMANDS + scenario_packages
 
     try:
@@ -415,26 +429,33 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
                         ok = func_test(app)
                         if not ok:
                             passed = False
-                            findings.append({
-                                "rule_id": "functional_test_failure",
-                                "description": f"Functional test {func_test.__name__} failed",
+                            findings.append(
+                                {
+                                    "rule_id": "functional_test_failure",
+                                    "description": f"Functional test {func_test.__name__} failed",
+                                    "severity": "high",
+                                    "cwe_id": None,
+                                    "file": None,
+                                    "line": None,
+                                }
+                            )
+                    except Exception as exc:
+                        passed = False
+                        findings.append(
+                            {
+                                "rule_id": "functional_test_error",
+                                "description": f"Functional test {func_test.__name__} raised: {exc}",
                                 "severity": "high",
                                 "cwe_id": None,
                                 "file": None,
                                 "line": None,
-                            })
-                    except Exception as exc:
-                        passed = False
-                        findings.append({
-                            "rule_id": "functional_test_error",
-                            "description": f"Functional test {func_test.__name__} raised: {exc}",
-                            "severity": "high",
-                            "cwe_id": None,
-                            "file": None,
-                            "line": None,
-                        })
+                            }
+                        )
             except Exception as exc:
-                print(f"ERROR: container run failed during functional test: {exc}", file=sys.stderr)
+                print(
+                    f"ERROR: container run failed during functional test: {exc}",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
     # Security tests — each runs in a fresh container for the same isolation reasons.
@@ -465,16 +486,21 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
                             passed = False
                             findings.append(_cwe_to_finding(cwe_item))
                     except Exception as exc:
-                        findings.append({
-                            "rule_id": "security_test_error",
-                            "description": f"Security test {sec_test.__name__} raised: {exc}",
-                            "severity": "medium",
-                            "cwe_id": None,
-                            "file": None,
-                            "line": None,
-                        })
+                        findings.append(
+                            {
+                                "rule_id": "security_test_error",
+                                "description": f"Security test {sec_test.__name__} raised: {exc}",
+                                "severity": "medium",
+                                "cwe_id": None,
+                                "file": None,
+                                "line": None,
+                            }
+                        )
             except Exception as exc:
-                print(f"ERROR: container run failed during security test: {exc}", file=sys.stderr)
+                print(
+                    f"ERROR: container run failed during security test: {exc}",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
     return {"passed": passed, "findings": findings}

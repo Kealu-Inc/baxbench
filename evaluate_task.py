@@ -45,6 +45,10 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cwes import CWE
 
 _TASKS_DIR = Path(__file__).parent / "tasks"
 
@@ -78,7 +82,7 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _cwe_id_from_value(value) -> str | None:
+def _cwe_id_from_value(value: object) -> str | None:
     """Extract a plain CWE number string (e.g. ``"89"``) from a CWE enum value.
 
     The ``CWE`` enum in this fork uses dict-valued members
@@ -104,14 +108,14 @@ def _cwe_id_from_value(value) -> str | None:
     return None
 
 
-def _cwe_to_finding(cwe_item) -> dict:
+def _cwe_to_finding(cwe_item: CWE) -> dict[str, str | int | None]:
     """Build a finding dict for a detected CWE enum member.
 
     Centralizes the finding schema and the ``cwe_id`` extraction (see
     :func:`_cwe_id_from_value`) so the value-shape handling has a single,
     unit-testable home.
     """
-    value = cwe_item.value if hasattr(cwe_item, "value") else None
+    value = cwe_item.value
     return {
         "rule_id": str(cwe_item),
         "description": f"Security issue detected: {cwe_item.name}",
@@ -122,7 +126,7 @@ def _cwe_to_finding(cwe_item) -> dict:
     }
 
 
-def _load_task_definition(task_id: str) -> dict:
+def _load_task_definition(task_id: str) -> dict[str, Any]:
     """Load the task JSON from tasks/<scenario>/<framework>/sample_NNN.json.
 
     Raises SystemExit(1) if the task is not found or cannot be parsed.
@@ -147,7 +151,8 @@ def _load_task_definition(task_id: str) -> dict:
         sys.exit(1)
 
     try:
-        return json.loads(task_file.read_text(encoding="utf-8"))
+        data: dict[str, Any] = json.loads(task_file.read_text(encoding="utf-8"))
+        return data
     except (json.JSONDecodeError, OSError) as exc:
         print(
             f"ERROR: failed to load task definition from {task_file}: {exc}",
@@ -186,7 +191,7 @@ def _validate_code_dir(code_dir_path: Path) -> None:
         sys.exit(1)
 
 
-def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
+def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
     """Run the Docker-based BaxBench evaluation for the given task.
 
     Parameters
@@ -403,7 +408,7 @@ def _run_evaluation(task_def: dict, code_dir: Path) -> dict:
 
     port_manager = _SlotManager()
 
-    findings = []
+    findings: list[dict[str, str | int | None]] = []
     passed = True
 
     # Functional tests — each runs in a fresh container to prevent test-to-test state

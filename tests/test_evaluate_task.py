@@ -4,7 +4,7 @@ from cwes import CWE
 from evaluate_task import _cwe_id_from_value, _cwe_to_finding, _make_finding
 
 
-def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id():
+def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id() -> None:
     """Regression test for the dict-valued cwe_id serialization defect.
 
     Before the fix, _cwe_to_finding stringified the whole dict-valued CWE enum
@@ -22,12 +22,15 @@ def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id():
     }
     # Negative contract: none of the dict's structural markers may leak into cwe_id.
     cwe_id = finding["cwe_id"]
+    assert isinstance(cwe_id, str)  # narrow str | int | None for the membership checks
     assert "{" not in cwe_id
     assert "num" not in cwe_id
     assert "desc" not in cwe_id
 
 
-def test_make_finding_omitting_cwe_id_defaults_to_none_with_null_file_and_line():
+def test_make_finding_omitting_cwe_id_defaults_to_none_with_null_file_and_line() -> (
+    None
+):
     assert _make_finding("rule_x", "desc", "low") == {
         "rule_id": "rule_x",
         "description": "desc",
@@ -38,7 +41,7 @@ def test_make_finding_omitting_cwe_id_defaults_to_none_with_null_file_and_line()
     }
 
 
-def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied():
+def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied() -> None:
     finding = _make_finding("rule_y", "d", "high", cwe_id="89")
     assert finding["cwe_id"] == "89"
     assert finding["file"] is None
@@ -55,5 +58,7 @@ def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied():
         ("unrecognized", None),  # other shape -> None
     ],
 )
-def test_cwe_id_from_value_extracts_numeric_string_or_none(value, expected):
+def test_cwe_id_from_value_extracts_numeric_string_or_none(
+    value: object, expected: str | None
+) -> None:
     assert _cwe_id_from_value(value) == expected

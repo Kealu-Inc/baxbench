@@ -45,7 +45,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from cwes import CWE
@@ -264,7 +264,7 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
     from env.python import AioHttpEnv, DjangoEnv, FastAPIEnv, FlaskEnv
     from env.ruby import RubyOnRailsEnv
     from env.rust import RustActixEnv
-    from tasks import ContainerRunner
+    from tasks import ContainerRunner, SlotManager
 
     # Lookup table: Env.id → Env class.  Used to map the framework_id slug
     # from the task JSON back to the concrete Env object needed by BaxBench.
@@ -419,7 +419,8 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
     # lifecycle code that follows forms a self-contained unit.
     from scenarios.base import AppInstance
 
-    port_manager = _SlotManager()
+    # Not nominally a SlotManager; cast so ContainerRunner's typed parameter accepts it.
+    port_manager = cast(SlotManager, _SlotManager())
 
     findings: list[dict[str, str | int | None]] = []
     passed = True

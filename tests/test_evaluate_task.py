@@ -8,7 +8,12 @@ def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id():
     # CWE.SQL_INJECTION.value == {"num": 89, "desc": "..."}; cwe_id must be "89",
     # NOT the serialized dict string.
     finding = _cwe_to_finding(CWE.SQL_INJECTION)
-    assert finding["cwe_id"] == "89"
+    cwe_id = finding["cwe_id"]
+    assert cwe_id == "89"
+    # Negative contract: none of the dict's structural markers may leak into cwe_id.
+    assert "{" not in cwe_id
+    assert "num" not in cwe_id
+    assert "desc" not in cwe_id
 
 
 @pytest.mark.parametrize(

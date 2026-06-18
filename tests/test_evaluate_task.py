@@ -10,6 +10,8 @@ def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id() -> None:
     Before the fix, _cwe_to_finding stringified the whole dict-valued CWE enum
     member ({"num": 89, ...}) into cwe_id. This pins the entire finding contract:
     cwe_id is the bare number "89" and every other field matches the schema.
+    See PR #2 (fix: extract numeric cwe_id from dict-valued CWE enum members) for
+    the original defect and fix.
     """
     finding = _cwe_to_finding(CWE.SQL_INJECTION)
     assert finding == {
@@ -42,10 +44,14 @@ def test_make_finding_omitting_cwe_id_defaults_to_none_with_null_file_and_line()
 
 
 def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied() -> None:
-    finding = _make_finding("rule_y", "d", "high", cwe_id="89")
-    assert finding["cwe_id"] == "89"
-    assert finding["file"] is None
-    assert finding["line"] is None
+    assert _make_finding("rule_y", "d", "high", cwe_id="89") == {
+        "rule_id": "rule_y",
+        "description": "d",
+        "severity": "high",
+        "cwe_id": "89",
+        "file": None,
+        "line": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -56,6 +62,8 @@ def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied() -> None:
         ((89, "x"), "89"),  # non-empty tuple
         (89, "89"),  # plain int
         ("unrecognized", None),  # other shape -> None
+        (True, "True"),  # bool is an int subclass -> str(True)
+        ((), None),  # empty tuple fails the `and value` guard -> None
     ],
 )
 def test_cwe_id_from_value_extracts_numeric_string_or_none(

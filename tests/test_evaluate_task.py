@@ -1,7 +1,12 @@
 import pytest
 
 from cwes import CWE
-from evaluate_task import _cwe_id_from_value, _cwe_to_finding, _make_finding
+from evaluate_task import (
+    _cwe_id_from_value,
+    _cwe_to_finding,
+    _load_task_definition,
+    _make_finding,
+)
 
 
 def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id() -> None:
@@ -70,3 +75,10 @@ def test_cwe_id_from_value_extracts_numeric_string_or_none(
     value: object, expected: str | None
 ) -> None:
     assert _cwe_id_from_value(value) == expected
+
+
+@pytest.mark.parametrize("task_id", ["", "scenario", "scenario.framework", "a.b.c.d"])
+def test_load_task_definition_rejects_malformed_task_id(task_id: str) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _load_task_definition(task_id)
+    assert exc_info.value.code == 1

@@ -9,27 +9,35 @@ from evaluate_task import (
 )
 
 
-def test_cwe_to_finding_sql_injection_yields_numeric_cwe_id() -> None:
-    """Regression test for the dict-valued cwe_id serialization defect.
+@pytest.mark.parametrize(
+    "cwe_member, expected_name, expected_cwe_id",
+    [
+        (CWE.SQL_INJECTION, "SQL_INJECTION", "89"),
+        (CWE.PATH_TRAVERSAL, "PATH_TRAVERSAL", "22"),
+    ],
+)
+def test_cwe_to_finding_yields_numeric_cwe_id(
+    cwe_member: CWE, expected_name: str, expected_cwe_id: str
+) -> None:
+    """Regression + generality test for the dict-valued cwe_id defect.
 
     Before the fix, _cwe_to_finding stringified the whole dict-valued CWE enum
-    member ({"num": 89, ...}) into cwe_id. This pins the entire finding contract:
-    cwe_id is the bare number "89" and every other field matches the schema.
-    See PR #2 (fix: extract numeric cwe_id from dict-valued CWE enum members) for
-    the original defect and fix.
+    member ({"num": 89, ...}) into cwe_id. Parametrizing over multiple members
+    pins that name->description and value->cwe_id mapping is general, not
+    hardcoded to SQL_INJECTION. See PR #2 for the original defect and fix.
     """
-    finding = _cwe_to_finding(CWE.SQL_INJECTION)
+    finding = _cwe_to_finding(cwe_member)
     assert finding == {
-        "rule_id": "CWE.SQL_INJECTION",
-        "description": "Security issue detected: SQL_INJECTION",
+        "rule_id": f"CWE.{expected_name}",
+        "description": f"Security issue detected: {expected_name}",
         "severity": "high",
-        "cwe_id": "89",
+        "cwe_id": expected_cwe_id,
         "file": None,
         "line": None,
     }
-    # Negative contract: none of the dict's structural markers may leak into cwe_id.
+    # Negative contract: no dict structural markers may leak into cwe_id.
     cwe_id = finding["cwe_id"]
-    assert isinstance(cwe_id, str)  # narrow str | int | None for the membership checks
+    assert isinstance(cwe_id, str)
     assert "{" not in cwe_id
     assert "num" not in cwe_id
     assert "desc" not in cwe_id
@@ -78,7 +86,14 @@ def test_cwe_id_from_value_extracts_numeric_string_or_none(
 
 
 @pytest.mark.parametrize("task_id", ["", "scenario", "scenario.framework", "a.b.c.d"])
-def test_load_task_definition_rejects_malformed_task_id(task_id: str) -> None:
+def test_load_task_definition_rejects_malformed_task_id(
+    task_id: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit) as exc_info:
         _load_task_definition(task_id)
     assert exc_info.value.code == 1
+    # All three exit-1 guards share code 1; assert the format-specific message
+    # to prove this guard fired (not the "not found" or JSON-error guard).
+    captured = capsys.readouterr()
+    assert "does not match" in captured.err
+    assert "format" in captured.err

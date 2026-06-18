@@ -67,7 +67,7 @@ def test_make_finding_keeps_file_and_line_none_when_cwe_id_supplied() -> None:
         ((89, "x"), "89"),  # non-empty tuple
         (89, "89"),  # plain int
         ("unrecognized", None),  # other shape -> None
-        (True, "True"),  # bool is an int subclass -> str(True)
+        (True, None),  # bool is an int subclass but is not a valid CWE number -> None
         ((), None),  # empty tuple fails the `and value` guard -> None
     ],
 )

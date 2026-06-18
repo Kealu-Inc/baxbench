@@ -96,7 +96,7 @@ def _cwe_id_from_value(value: object) -> str | None:
 
     * ``dict`` with a ``"num"`` key → ``str(value["num"])``
     * ``(int, ...)`` tuple → ``str(value[0])``
-    * plain ``int`` → ``str(value)``
+    * plain ``int`` (but not ``bool``) → ``str(value)``
     * anything else → ``None`` (caller records a null ``cwe_id``)
     """
     if isinstance(value, dict):
@@ -104,7 +104,9 @@ def _cwe_id_from_value(value: object) -> str | None:
         return str(num) if num is not None else None
     if isinstance(value, tuple) and value:
         return str(value[0])
-    if isinstance(value, int):
+    # bool is a subclass of int, but True/False is never a valid CWE number;
+    # exclude it so booleans fall through to the null cwe_id branch below.
+    if isinstance(value, int) and not isinstance(value, bool):
         return str(value)
     _logger.debug("Unrecognized CWE value shape %r; recording null cwe_id", value)
     return None

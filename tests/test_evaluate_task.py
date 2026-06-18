@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from cwes import CWE
@@ -97,3 +99,13 @@ def test_load_task_definition_rejects_malformed_task_id(
     captured = capsys.readouterr()
     assert "does not match" in captured.err
     assert "format" in captured.err
+
+
+def test_cwe_id_from_value_logs_debug_for_unrecognized_shape(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The unrecognized-shape branch returns None and emits a debug log."""
+    with caplog.at_level(logging.DEBUG, logger="evaluate_task"):
+        result = _cwe_id_from_value("unrecognized")
+    assert result is None
+    assert any("Unrecognized CWE value shape" in msg for msg in caplog.messages)

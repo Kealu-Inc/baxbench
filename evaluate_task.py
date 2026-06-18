@@ -53,6 +53,11 @@ if TYPE_CHECKING:
 _TASKS_DIR = Path(__file__).parent / "tasks"
 _logger = logging.getLogger("evaluate_task")
 
+# Finding severity levels recorded in the output JSON; single source of truth
+# for the four finding sites below.
+_SEVERITY_HIGH = "high"
+_SEVERITY_MEDIUM = "medium"
+
 
 def _parse_args() -> argparse.Namespace:
     """Parse and return command-line arguments.
@@ -140,7 +145,7 @@ def _cwe_to_finding(cwe_item: CWE) -> dict[str, str | int | None]:
     return _make_finding(
         str(cwe_item),
         f"Security issue detected: {cwe_item.name}",
-        "high",
+        _SEVERITY_HIGH,
         cwe_id=_cwe_id_from_value(value),
     )
 
@@ -454,7 +459,7 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                                 _make_finding(
                                     "functional_test_failure",
                                     f"Functional test {func_test.__name__} failed",
-                                    "high",
+                                    _SEVERITY_HIGH,
                                 )
                             )
                     except Exception as exc:
@@ -463,7 +468,7 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                             _make_finding(
                                 "functional_test_error",
                                 f"Functional test {func_test.__name__} raised: {exc}",
-                                "high",
+                                _SEVERITY_HIGH,
                             )
                         )
             except Exception as exc:
@@ -501,11 +506,19 @@ def _run_evaluation(task_def: dict[str, Any], code_dir: Path) -> dict[str, Any]:
                             passed = False
                             findings.append(_cwe_to_finding(cwe_item))
                     except Exception as exc:
+                        # A security test *erroring* is a harness/infrastructure
+                        # failure, not evidence the app is vulnerable, so it is
+                        # recorded as a finding for visibility but deliberately
+                        # does NOT set passed=False — mirroring the inconclusive
+                        # (found_cwes is None) case above. Only an actual CWE
+                        # finding flips passed to False. Functional-test errors
+                        # differ (they set passed=False) because a broken app is
+                        # itself a failure.
                         findings.append(
                             _make_finding(
                                 "security_test_error",
                                 f"Security test {sec_test.__name__} raised: {exc}",
-                                "medium",
+                                _SEVERITY_MEDIUM,
                             )
                         )
             except Exception as exc:
